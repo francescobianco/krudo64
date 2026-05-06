@@ -153,6 +153,9 @@ int eval(const Board *b)
     int pawn_struct = PAWN_STRUCTURE[pawn_file_mask(b->pieces[WHITE][PAWN])]
                     - PAWN_STRUCTURE[pawn_file_mask(b->pieces[BLACK][PAWN])];
 
-    int s = (score[WHITE] - score[BLACK]) + mob + pawn_struct;
+    int clusters = eval_pawn_clusters(b->pieces[WHITE][PAWN], WHITE)
+                 - eval_pawn_clusters(b->pieces[BLACK][PAWN], BLACK);
+
+    int s = (score[WHITE] - score[BLACK]) + mob + pawn_struct + clusters;
     return (b->side == WHITE) ? s : -s;
 }

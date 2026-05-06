@@ -332,3 +332,169 @@ static inline uint8_t pawn_file_mask(Bitboard pawns)
     f |= f >>  8;   /* OR riga  1   in 0   */
     return (uint8_t)(f & 0xFF);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * CLUSTER DI PEDONI — valutazione basata sul rango (traversa)
+ *
+ * Si classificano gruppi di pedoni su colonne consecutive guardando
+ * ANCHE quanto sono avanzati (traversa di ogni pedone).
+ *
+ * Regola per run di 4+ colonne consecutive:
+ *   si considera SOLO il cluster di 3 più centrale rispetto alla scacchiera
+ *   (colonne d/e = massima centralità).
+ *
+ * NORMALIZZAZIONE DEL RANGO
+ *   Bianco: rango normalizzato = traversa del pedone (0=traversa 1 … 7=traversa 8)
+ *   Nero:   rango normalizzato = 7 − traversa  (più avanzato → valore più alto)
+ *   Per entrambi i lati: rango più alto = pedone più avanzato.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Cluster di 2 (.pp.) ─────────────────────────────────────────────────── *
+ * Indice: |Δrango| tra i due pedoni del cluster.                             *
+ *                                                                            *
+ *  |Δ|   Formazione     Descrizione                          Score          *
+ *  ────  ─────────────  ───────────────────────────────────  ──────         *
+ *   0    Appaiati        stessa traversa (es. d4-e4)           +10          *
+ *   1    Sfalsati        una traversa di distanza (d4-e5)       +7          *
+ *   2    Distanti        due traverse                           +3          *
+ *  ≥3    Molto distanti  tre o più traverse, scarsa sinergia     0          *
+ * ─────────────────────────────────────────────────────────────────────────── */
+static const int CLUSTER2[8] = { 10, 7, 3, 0, 0, 0, 0, 0 };
+
+/* ── Cluster di 3 (.ppp.) ────────────────────────────────────────────────── *
+ * FORMA (CLUSTER3_SHAPE): indicizzata da [sign(d1)+1][sign(d2)+1]           *
+ *   d1 = rango[col+1] − rango[col]                                          *
+ *   d2 = rango[col+2] − rango[col+1]                                        *
+ *   indice 0=negativo  1=zero  2=positivo                                   *
+ *                                                                            *
+ *          │  d2 neg(0)  d2 zero(1)  d2 pos(2)                              *
+ *  ─────────┼──────────────────────────────────                              *
+ *  d1 neg(0)│ +8          +5         -8                                      *
+ *           │ Falange↘    L-sx       Valle                                   *
+ *           │ (sx guida,  (sx=cen,   (centro più                             *
+ *           │  catena)    dx dietro)  arretrato)                             *
+ *  d1 zer(1)│ +5         +10         +5                                      *
+ *           │ L-dx        Appaiati    L-sx                                   *
+ *           │ (sx=cen,    (stessa     (cen=dx,                               *
+ *           │  dx avanti)  traversa)  sx dietro)                            *
+ *  d1 pos(2)│+12          +5         +8                                      *
+ *           │ Piramide    L-dx       Falange↗                                *
+ *           │ (centro      (cen=dx,  (dx guida,                              *
+ *           │  in avanti)  sx dietro) catena)                                *
+ * ─────────────────────────────────────────────────────────────────────────── */
+static const int CLUSTER3_SHAPE[3][3] = {
+    /* d2: neg(0)  zer(1)  pos(2) */
+    {   8,      5,     -8  },   /* d1 neg: falange↘, L, valle    */
+    {   5,     10,      5  },   /* d1 zer: L, appaiati, L         */
+    {  12,      5,      8  },   /* d1 pos: piramide, L, falange↗  */
+};
+
+/* DISPERSIONE (CLUSTER3_SPREAD): penalità per traversa max − traversa min.  *
+ * Pedoni molto distanti in altezza hanno scarsa coesione tattica.           *
+ *                                                                            *
+ *  spread   0   1   2   3   4   5   6   7                                   *
+ *  penalty  0   0   2   5   8  11  14  16                                   *
+ * ─────────────────────────────────────────────────────────────────────────── */
+static const int CLUSTER3_SPREAD[8] = { 0, 0, 2, 5, 8, 11, 14, 16 };
+
+/* ── Centralità delle triple ─────────────────────────────────────────────── *
+ * Somma dei valori di centralità  c={0,1,2,3,3,2,1,0}  per i tre file.     *
+ * Usata per scegliere il cluster di 3 più centrale in run di 4+ pedoni.     *
+ * Indice = colonna di partenza del cluster (0..5).                          *
+ * ─────────────────────────────────────────────────────────────────────────── */
+static const int TRIPLE_CENTRALITY[6] = { 3, 6, 8, 8, 6, 3 };
+
+/* ── cluster_rank ────────────────────────────────────────────────────────── *
+ * Rango normalizzato del pedone più avanzato di *color* sulla colonna *f*.  *
+ * Ritorna -1 se non ci sono pedoni su quella colonna.                       */
+static inline int cluster_rank(Bitboard pawns, int color, int f)
+{
+    Bitboard col = pawns & (0x0101010101010101ULL << f);
+    if (!col) return -1;
+    return (color == WHITE) ? (MSB(col) >> 3)
+                            : (7 - (LSB(col) >> 3));
+}
+
+/* ── most_central_triple ─────────────────────────────────────────────────── *
+ * Restituisce la colonna di partenza del cluster di 3 con massima           *
+ * centralità scacchistica nell'intervallo [lo..hi].                         */
+static inline int most_central_triple(int lo, int hi)
+{
+    int best_f = lo, best_c = -1;
+    for (int f = lo; f <= hi; f++) {
+        int c = (f <= 5) ? TRIPLE_CENTRALITY[f] : 0;
+        if (c > best_c) { best_c = c; best_f = f; }
+    }
+    return best_f;
+}
+
+/* ── eval_pawn_clusters ──────────────────────────────────────────────────── *
+ * Punteggio totale dei cluster per il lato *color*.                         *
+ * Scansiona la maschera di colonna, identifica run consecutivi e applica:   *
+ *   run=2 → CLUSTER2                                                        *
+ *   run=3 → CLUSTER3_SHAPE − CLUSTER3_SPREAD                                *
+ *   run≥4 → CLUSTER3 del solo cluster di 3 più centrale del run             *
+ * ─────────────────────────────────────────────────────────────────────────── */
+static inline int eval_pawn_clusters(Bitboard pawns, int color)
+{
+    uint8_t mask = pawn_file_mask(pawns);
+    if (!mask) return 0;
+
+    int total = 0;
+
+    /* Scansione dei run di colonne consecutive occupate */
+    int run_start = -1, run_len = 0;
+    for (int f = 0; f <= 8; f++) {
+        if (f < 8 && (mask & (1 << f))) {
+            if (run_len == 0) run_start = f;
+            run_len++;
+        } else if (run_len > 0) {
+            /* Fine run: [run_start .. run_start+run_len-1] */
+
+            if (run_len == 2) {
+                /* ── Cluster di 2 ── */
+                int r0 = cluster_rank(pawns, color, run_start);
+                int r1 = cluster_rank(pawns, color, run_start + 1);
+                if (r0 >= 0 && r1 >= 0) {
+                    int delta = r0 > r1 ? r0 - r1 : r1 - r0;
+                    total += CLUSTER2[delta > 7 ? 7 : delta];
+                }
+
+            } else if (run_len == 3) {
+                /* ── Cluster di 3 esatto ── */
+                int r0 = cluster_rank(pawns, color, run_start);
+                int r1 = cluster_rank(pawns, color, run_start + 1);
+                int r2 = cluster_rank(pawns, color, run_start + 2);
+                if (r0 >= 0 && r1 >= 0 && r2 >= 0) {
+                    int d1 = (r1 > r0) - (r1 < r0);   /* sign */
+                    int d2 = (r2 > r1) - (r2 < r1);
+                    int mn = r0 < r1 ? r0 : r1; if (r2 < mn) mn = r2;
+                    int mx = r0 > r1 ? r0 : r1; if (r2 > mx) mx = r2;
+                    int sp = mx - mn; if (sp > 7) sp = 7;
+                    total += CLUSTER3_SHAPE[d1 + 1][d2 + 1] - CLUSTER3_SPREAD[sp];
+                }
+
+            } else {
+                /* ── Run di 4+: solo il cluster di 3 più centrale ── */
+                int f0 = most_central_triple(run_start,
+                                             run_start + run_len - 3);
+                int r0 = cluster_rank(pawns, color, f0);
+                int r1 = cluster_rank(pawns, color, f0 + 1);
+                int r2 = cluster_rank(pawns, color, f0 + 2);
+                if (r0 >= 0 && r1 >= 0 && r2 >= 0) {
+                    int d1 = (r1 > r0) - (r1 < r0);
+                    int d2 = (r2 > r1) - (r2 < r1);
+                    int mn = r0 < r1 ? r0 : r1; if (r2 < mn) mn = r2;
+                    int mx = r0 > r1 ? r0 : r1; if (r2 > mx) mx = r2;
+                    int sp = mx - mn; if (sp > 7) sp = 7;
+                    total += CLUSTER3_SHAPE[d1 + 1][d2 + 1] - CLUSTER3_SPREAD[sp];
+                }
+            }
+
+            run_start = -1;
+            run_len   = 0;
+        }
+    }
+
+    return total;
+}
