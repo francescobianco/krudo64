@@ -1,5 +1,6 @@
 #include "eval.h"
 #include "eval/pawn.h"
+#include "eval/king_attack.h"
 #include "atlas.h"
 #include "types.h"
 
@@ -127,11 +128,15 @@ static int _clusters  (const Board *b) {
     return eval_pawn_clusters(b->pieces[WHITE][PAWN], WHITE)
          - eval_pawn_clusters(b->pieces[BLACK][PAWN], BLACK);
 }
+static int _king_attack(const Board *b) {
+    return eval_king_attack(b, WHITE) - eval_king_attack(b, BLACK);
+}
 
 /* ── Feature pointers (swapped via eval_set_feature, no if in hot path) ───── */
 static int (*fp_mobility)   (const Board *) = _mobility;
 static int (*fp_pawn_struct)(const Board *) = _pawn_struct;
 static int (*fp_clusters)   (const Board *) = _clusters;
+static int (*fp_king_attack)(const Board *) = _king_attack;
 
 void eval_set_feature(EvalFeature feat, int on)
 {
@@ -142,6 +147,8 @@ void eval_set_feature(EvalFeature feat, int on)
             fp_pawn_struct = on ? _pawn_struct : _zero; break;
         case EVAL_FEAT_CLUSTERS:
             fp_clusters    = on ? _clusters    : _zero; break;
+        case EVAL_FEAT_KING_ATTACK:
+            fp_king_attack = on ? _king_attack : _zero; break;
     }
 }
 
@@ -168,6 +175,7 @@ int eval(const Board *b)
     int s = (score[WHITE] - score[BLACK])
           + fp_mobility(b)
           + fp_pawn_struct(b)
-          + fp_clusters(b);
+          + fp_clusters(b)
+          + fp_king_attack(b);
     return (b->side == WHITE) ? s : -s;
 }

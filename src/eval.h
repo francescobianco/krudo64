@@ -5,6 +5,7 @@ typedef enum {
     EVAL_FEAT_MOBILITY,
     EVAL_FEAT_PAWN_STRUCT,
     EVAL_FEAT_CLUSTERS,
+    EVAL_FEAT_KING_ATTACK,
 } EvalFeature;
 
 /* Swap a feature function-pointer to its real impl (on=1) or zero-stub (on=0). */

@@ -96,6 +96,7 @@ void uci_loop(void)
             printf("option name UseMobility type check default true\n");
             printf("option name UsePawnStructure type check default true\n");
             printf("option name UseClusters type check default true\n");
+            printf("option name UseKingAttack type check default true\n");
             printf("uciok\n");
             fflush(stdout);
 
@@ -112,6 +113,7 @@ void uci_loop(void)
                 if      (strncmp(np, "UseMobility",     11) == 0) eval_set_feature(EVAL_FEAT_MOBILITY,    on);
                 else if (strncmp(np, "UsePawnStructure", 16) == 0) eval_set_feature(EVAL_FEAT_PAWN_STRUCT, on);
                 else if (strncmp(np, "UseClusters",     11) == 0) eval_set_feature(EVAL_FEAT_CLUSTERS,    on);
+                else if (strncmp(np, "UseKingAttack",   13) == 0) eval_set_feature(EVAL_FEAT_KING_ATTACK,  on);
             }
 
         } else if (strcmp(line, "ucinewgame") == 0) {

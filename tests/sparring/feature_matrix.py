@@ -25,25 +25,29 @@ from engine import play_game, find_exec, write_pgn  # noqa: E402
 KRUDO_DEPTH  = 5            # profondità krudo fissa
 FRUIT_DEPTHS = range(1, 6)  # fruit d1..d5 — 1 coppia ciascuna = 10 partite/combo
 
-# Le 8 combinazioni: (label, mob, pawn_struct, clusters)
-COMBOS = [
-    ("none",      False, False, False),
-    ("mob",       True,  False, False),
-    ("struct",    False, True,  False),
-    ("cluster",   False, False, True),
-    ("mob+str",   True,  True,  False),
-    ("mob+clu",   True,  False, True),
-    ("str+clu",   False, True,  True),
-    ("all",       True,  True,  True),
+# Le 4 feature con la loro chiave display e il nome UCI
+FEATURES = [
+    ("M", "UseMobility"),
+    ("S", "UsePawnStructure"),
+    ("C", "UseClusters"),
+    ("K", "UseKingAttack"),
 ]
 
+# Genera tutte le 2^4 = 16 combinazioni
+def _build_combos():
+    combos = []
+    for bits in range(1 << len(FEATURES)):
+        flags = [bool(bits & (1 << i)) for i in range(len(FEATURES))]
+        label = "+".join(k for (k, _), on in zip(FEATURES, flags) if on) or "none"
+        combos.append((label, *flags))
+    return combos
 
-def combo_opts(mob: bool, struct: bool, cluster: bool) -> dict:
-    return {
-        "UseMobility":      "true" if mob     else "false",
-        "UsePawnStructure": "true" if struct  else "false",
-        "UseClusters":      "true" if cluster else "false",
-    }
+COMBOS = _build_combos()
+
+
+def combo_opts(flags: list[bool]) -> dict:
+    return {name: ("true" if on else "false")
+            for (_, name), on in zip(FEATURES, flags)}
 
 
 def main() -> int:
@@ -59,24 +63,28 @@ def main() -> int:
 
     games_per_combo = len(FRUIT_DEPTHS) * 2
     total_games     = len(COMBOS) * games_per_combo
+    feat_keys       = "  ".join(k for k, _ in FEATURES)
     print(f"krudo64 : {krudo}  depth={KRUDO_DEPTH}")
     print(f"fruit   : {fruit}  depth d{FRUIT_DEPTHS.start}..d{FRUIT_DEPTHS.stop - 1}")
-    print(f"partite : {games_per_combo}/combo × {len(COMBOS)} combo = {total_games} totali"
+    print(f"combo   : {len(COMBOS)}  |  partite: {games_per_combo}/combo × {len(COMBOS)} = {total_games}"
           f"  (max {games_per_combo * 2} pts/combo)")
     print()
 
     # Header tabella
-    W = 10
-    print(f"  {'combo':^{W}}  M  S  C  |  W   D   L  | pts/{games_per_combo * 2}")
-    print("  " + "─" * (W + 34))
+    W = 13
+    print(f"  {'combo':^{W}}  {feat_keys}  |  W   D   L  | pts/{games_per_combo * 2}")
+    sep = "  " + "─" * (W + 4 * len(FEATURES) + 22)
+    print(sep)
 
     all_games = []
     results   = []
 
-    for label, mob, struct, cluster in COMBOS:
-        opts = combo_opts(mob, struct, cluster)
-        kl   = f"krudo({label})"
-        wins = draws = losses = 0
+    for row in COMBOS:
+        label = row[0]
+        flags = list(row[1:])
+        opts  = combo_opts(flags)
+        kl    = f"krudo({label})"
+        wins  = draws = losses = 0
 
         for fd in FRUIT_DEPTHS:
             fl = f"fruit(d{fd})"
@@ -108,29 +116,25 @@ def main() -> int:
             else:               draws  += 1
 
         pts = wins * 2 + draws
-        results.append((label, mob, struct, cluster, wins, draws, losses, pts))
+        results.append((label, flags, wins, draws, losses, pts))
 
-        ms = "Y" if mob     else "."
-        ss = "Y" if struct  else "."
-        cs = "Y" if cluster else "."
-        print(f"  {label:^{W}}  {ms}  {ss}  {cs}  | {wins:>2}  {draws:>2}  {losses:>2}  | {pts:>3}")
+        feat_display = "  ".join("Y" if on else "." for on in flags)
+        print(f"  {label:^{W}}  {feat_display}  | {wins:>2}  {draws:>2}  {losses:>2}  | {pts:>3}")
         sys.stdout.flush()
 
-    print("  " + "─" * (W + 34))
+    print(sep)
     print()
 
     # Classifica per punti (parità: più vittorie prima)
-    results.sort(key=lambda r: (r[7], r[4]), reverse=True)
+    results.sort(key=lambda r: (r[5], r[2]), reverse=True)
     print("Classifica:")
-    for rank, (lbl, mob, struct, cluster, w, d, l, pts) in enumerate(results, 1):
-        ms = "M" if mob     else "-"
-        ss = "S" if struct  else "-"
-        cs = "C" if cluster else "-"
-        print(f"  {rank}. [{ms}{ss}{cs}] {lbl:<{W}}  {pts} pts  ({w}W {d}D {l}L)")
+    for rank, (lbl, flags, w, d, l, pts) in enumerate(results, 1):
+        feat_str = "".join(k if on else "-" for (k, _), on in zip(FEATURES, flags))
+        print(f"  {rank:>2}. [{feat_str}] {lbl:<{W}}  {pts:>3} pts  ({w}W {d}D {l}L)")
     print()
 
     best = results[0]
-    print(f"Combinazione migliore: {best[0]}  ({best[7]} pts)")
+    print(f"Combinazione migliore: {best[0]}  ({best[5]} pts)")
 
     pgn_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "feature_matrix.pgn")
     write_pgn(all_games, pgn_path)
