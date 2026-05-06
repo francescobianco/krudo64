@@ -1,4 +1,5 @@
 #include "eval.h"
+#include "eval/pawn.h"
 #include "atlas.h"
 #include "types.h"
 
@@ -145,6 +146,13 @@ int eval(const Board *b)
      * centipawn per ogni mossa di differenza.                                  */
     int mob = MOBILITY_WEIGHT * (mobility_count(b, WHITE) - mobility_count(b, BLACK));
 
-    int s = (score[WHITE] - score[BLACK]) + mob;
+    /* Struttura dei pedoni per colonna.
+     * pawn_file_mask() riduce la bitboard a 8 bit (colonna c'è / non c'è).
+     * PAWN_STRUCTURE[] assegna un punteggio tematico ai 256 pattern possibili
+     * premiando catene centrali e penalizzando pedoni isolati / isole multiple. */
+    int pawn_struct = PAWN_STRUCTURE[pawn_file_mask(b->pieces[WHITE][PAWN])]
+                    - PAWN_STRUCTURE[pawn_file_mask(b->pieces[BLACK][PAWN])];
+
+    int s = (score[WHITE] - score[BLACK]) + mob + pawn_struct;
     return (b->side == WHITE) ? s : -s;
 }
