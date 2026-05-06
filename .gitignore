@@ -1,6 +1,6 @@
 # Build artifacts
 krudo64
-src/*.o
+out/
 /tmp/k64_*
 
 # Editor

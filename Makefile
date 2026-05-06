@@ -3,7 +3,7 @@ CFLAGS  = -std=c11 -O2 -Wall -Wextra -Wpedantic
 LDFLAGS =
 TARGET  = krudo64
 SRCS    = $(wildcard src/*.c)
-OBJS    = $(SRCS:.c=.o)
+OBJS    = $(patsubst src/%.c, out/%.o, $(SRCS))
 # All source files except main.c (for tests that supply their own main)
 LIB_SRCS = src/atlas.c src/board.c src/movegen.c src/eval.c src/search.c src/uci.c
 
@@ -14,8 +14,11 @@ build: $(TARGET)
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
 
-%.o: %.c
+out/%.o: src/%.c | out
 	$(CC) $(CFLAGS) -c -o $@ $<
+
+out:
+	@mkdir -p out
 
 run: build
 	@./$(TARGET)
@@ -45,7 +48,7 @@ test-tournament: build
 	@$(CC) $(CFLAGS) tests/tournament/self_play.c $(LIB_SRCS) -o /tmp/k64_selfplay && /tmp/k64_selfplay
 
 clean:
-	@rm -f src/*.o $(TARGET) /tmp/k64_*
+	@rm -rf out $(TARGET) /tmp/k64_*
 	@echo "cleaned"
 
 help:
