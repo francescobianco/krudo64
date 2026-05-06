@@ -1,4 +1,5 @@
 #include "eval.h"
+#include "atlas.h"
 #include "types.h"
 
 /* ── Material values (centipawns) ─────────────────────────────────────────── */
@@ -82,6 +83,39 @@ static const int * const PST[6] = {
     PST_ROOK, PST_QUEEN,  PST_KING_MG
 };
 
+/* ── Mobility ─────────────────────────────────────────────────────────────── *
+ * Conta i quadrati pseudo-legali raggiungibili da cavalli, alfieri, torri e  *
+ * regine di *color*. Pedoni e re sono esclusi (contributo trascurabile o     *
+ * già coperto dal PST del re).                                               *
+ * Usa l'ATLAS esistente: nessuna nuova lookup table.                         */
+#define MOBILITY_WEIGHT 2   /* centipawn per mossa di vantaggio */
+
+static int mobility_count(const Board *b, int color)
+{
+    Bitboard free = ~b->occ[color];  /* quadrati non occupati da pezzi amici */
+    Bitboard occ  = b->all;
+    int      n    = 0;
+    Bitboard bb;
+
+    bb = b->pieces[color][KNIGHT];
+    while (bb) { int sq = LSB(bb); POPLSB(bb);
+                 n += POPCNT(ATLAS.knight[sq] & free); }
+
+    bb = b->pieces[color][BISHOP];
+    while (bb) { int sq = LSB(bb); POPLSB(bb);
+                 n += POPCNT(bishop_attacks(sq, occ) & free); }
+
+    bb = b->pieces[color][ROOK];
+    while (bb) { int sq = LSB(bb); POPLSB(bb);
+                 n += POPCNT(rook_attacks(sq, occ) & free); }
+
+    bb = b->pieces[color][QUEEN];
+    while (bb) { int sq = LSB(bb); POPLSB(bb);
+                 n += POPCNT(queen_attacks(sq, occ) & free); }
+
+    return n;
+}
+
 /* ── eval ─────────────────────────────────────────────────────────────────── */
 int eval(const Board *b)
 {
@@ -106,6 +140,11 @@ int eval(const Board *b)
         }
     }
 
-    int s = score[WHITE] - score[BLACK];
+    /* Mobility: più mosse pseudo-legali = più libertà = vantaggio strutturale. *
+     * Penalizzare l'avversario con meno libertà di movimento vale MOBILITY_WEIGHT
+     * centipawn per ogni mossa di differenza.                                  */
+    int mob = MOBILITY_WEIGHT * (mobility_count(b, WHITE) - mobility_count(b, BLACK));
+
+    int s = (score[WHITE] - score[BLACK]) + mob;
     return (b->side == WHITE) ? s : -s;
 }
