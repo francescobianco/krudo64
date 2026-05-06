@@ -13,19 +13,24 @@ Regole
 - PASS se la profondità di fruit necessaria è > THRESHOLD (6)
 - FAIL altrimenti
 
-Dipende da python-chess per il tracking preciso dello stato di gioco.
-  pip install chess
+Al termine sovrascrive tests/sparring/vs_fruit.pgn con tutte le partite
+giocate (committare per analisi esterna).
+
+Dipende da python-chess:  pip install chess
 """
 
 import subprocess
 import sys
 import os
 import shutil
+import datetime
 
 try:
     import chess
+    import chess.pgn
 except ImportError:
     sys.exit("python-chess richiesto: pip install chess")
+
 
 # ── UCI engine wrapper ────────────────────────────────────────────────────────
 
@@ -46,7 +51,6 @@ class UCIEngine:
         self._proc.stdin.flush()
 
     def _wait_for(self, prefix: str) -> str | None:
-        """Legge righe fino a trovarne una che inizia con *prefix*."""
         while True:
             line = self._proc.stdout.readline()
             if not line:
@@ -56,7 +60,7 @@ class UCIEngine:
                 return line[len(prefix):]
 
     def init(self) -> None:
-        self._send("uci");    self._wait_for("uciok")
+        self._send("uci");     self._wait_for("uciok")
         self._send("isready"); self._wait_for("readyok")
 
     def new_game(self) -> None:
@@ -64,17 +68,10 @@ class UCIEngine:
         self._send("isready"); self._wait_for("readyok")
 
     def bestmove(self, board: chess.Board, depth: int) -> chess.Move | None:
-        """Chiede all'engine la mossa migliore per la posizione *board*."""
-        # Costruisce il comando position con lista mosse
         moves = [m.uci() for m in board.move_stack]
-        if moves:
-            pos = "position startpos moves " + " ".join(moves)
-        else:
-            pos = "position startpos"
-
+        pos = ("position startpos moves " + " ".join(moves)) if moves else "position startpos"
         self._send(pos)
         self._send(f"go depth {depth}")
-
         while True:
             line = self._proc.stdout.readline()
             if not line:
@@ -98,22 +95,22 @@ class UCIEngine:
             self._proc.kill()
 
 
-# ── game logic ────────────────────────────────────────────────────────────────
+# ── game + PGN ────────────────────────────────────────────────────────────────
 
-MAX_MOVES = 200  # mosse totali prima di dichiarare patta per troppo prolungamento
-
+MAX_MOVES = 200  # mosse totali prima di dichiarare patta per prolungamento
 
 def play_game(
-    white_path: str, white_depth: int,
-    black_path: str, black_depth: int,
-) -> str:
+    white_path: str, white_depth: int, white_label: str,
+    black_path:  str, black_depth:  int, black_label:  str,
+    round_tag: str,
+) -> tuple[str, chess.pgn.Game]:
     """
-    Gioca una partita completa tra due engine.
-    Ritorna 'white', 'black' o 'draw'.
+    Gioca una partita completa.
+    Ritorna (risultato, pgn_game) dove risultato è 'white' | 'black' | 'draw'.
     """
-    board  = chess.Board()
-    white  = UCIEngine(white_path, "white")
-    black  = UCIEngine(black_path, "black")
+    board = chess.Board()
+    white = UCIEngine(white_path, white_label)
+    black = UCIEngine(black_path,  black_label)
     white.init();  black.init()
     white.new_game(); black.new_game()
 
@@ -121,20 +118,34 @@ def play_game(
         for _ in range(MAX_MOVES):
             if board.is_game_over():
                 break
-
             engine = white if board.turn == chess.WHITE else black
             depth  = white_depth if board.turn == chess.WHITE else black_depth
-
             mv = engine.bestmove(board, depth)
             if mv is None:
-                break   # nessuna mossa: uscita anticipata (come stallo)
-
+                break
             board.push(mv)
 
-        result = board.result(claim_draw=True)
-        if result == "1-0":  return "white"
-        if result == "0-1":  return "black"
-        return "draw"
+        result_str = board.result(claim_draw=True)
+
+        # Costruisce l'oggetto PGN
+        game = chess.pgn.Game()
+        game.headers["Event"]  = "krudo64 sparring vs fruit"
+        game.headers["Site"]   = "local"
+        game.headers["Date"]   = datetime.date.today().strftime("%Y.%m.%d")
+        game.headers["Round"]  = round_tag
+        game.headers["White"]  = white_label
+        game.headers["Black"]  = black_label
+        game.headers["Result"] = result_str
+
+        node = game
+        for mv in board.move_stack:
+            node = node.add_variation(mv)
+
+        if   result_str == "1-0": outcome = "white"
+        elif result_str == "0-1": outcome = "black"
+        else:                     outcome = "draw"
+
+        return outcome, game
 
     finally:
         white.quit()
@@ -149,6 +160,14 @@ def find_exec(*names: str) -> str | None:
             if candidate and os.access(candidate, os.X_OK):
                 return candidate
     return None
+
+
+def write_pgn(games: list[chess.pgn.Game], path: str) -> None:
+    with open(path, "w") as f:
+        for game in games:
+            print(game, file=f)
+            print(file=f)   # blank line between games
+    print(f"PGN salvato → {path}  ({len(games)} partite)")
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
@@ -175,13 +194,20 @@ def main() -> int:
     print(f"  {'d':>2}   {'krudo=bianco':^{col}}   {'krudo=nero':^{col}}")
     print("  " + "-" * (col * 2 + 12))
 
-    fruit_won_at: int | None = None
+    pgn_games:    list[chess.pgn.Game] = []
+    fruit_won_at: int | None           = None
 
     for fd in range(1, 21):
-        # partita 1: krudo=bianco(d5) vs fruit=nero(fd)
-        r1 = play_game(krudo, KRUDO_DEPTH, fruit, fd)
-        # partita 2: fruit=bianco(fd) vs krudo=nero(d5)
-        r2 = play_game(fruit, fd, krudo, KRUDO_DEPTH)
+        kl = f"krudo64 (d{KRUDO_DEPTH})"
+        fl = f"fruit (d{fd})"
+
+        # partita 1 — krudo=bianco
+        r1, g1 = play_game(krudo, KRUDO_DEPTH, kl, fruit, fd, fl, f"{fd}.1")
+        pgn_games.append(g1)
+
+        # partita 2 — krudo=nero
+        r2, g2 = play_game(fruit, fd, fl, krudo, KRUDO_DEPTH, kl, f"{fd}.2")
+        pgn_games.append(g2)
 
         s1 = ("krudo vince" if r1 == "white"
               else "fruit vince" if r1 == "black"
@@ -200,6 +226,11 @@ def main() -> int:
             fruit_won_at = fd
             break
 
+    print()
+
+    # Scrive il PGN accanto a questo script
+    pgn_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vs_fruit.pgn")
+    write_pgn(pgn_games, pgn_path)
     print()
 
     if fruit_won_at is None:

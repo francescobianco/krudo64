@@ -3,8 +3,13 @@ krudo64
 out/
 /tmp/k64_*
 
-# Editor
+# Editor / IDE
 .vscode/
+.idea/
 *.swp
 *~
 .DS_Store
+
+# Python
+__pycache__/
+*.pyc
