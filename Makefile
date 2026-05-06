@@ -9,7 +9,7 @@ LIB_SRCS = src/atlas.c src/board.c src/movegen.c src/eval.c src/search.c src/uci
 
 depth ?= 5
 
-.PHONY: build run perft test test-unit test-functional test-integration test-challenge test-tournament test-sparring clean help
+.PHONY: build run perft test test-unit test-functional test-integration test-challenge test-tournament test-sparring test-feature-matrix clean help
 
 build: $(TARGET)
 
@@ -59,6 +59,10 @@ test-sparring: build
 	@echo "==> sparring vs fruit  (può richiedere diversi minuti)"
 	@python3 tests/sparring/vs_fruit.py
 
+test-feature-matrix: build
+	@echo "==> feature matrix — tutte le combinazioni vs fruit  (può richiedere diversi minuti)"
+	@python3 tests/sparring/feature_matrix.py
+
 clean:
 	@rm -rf out $(TARGET) /tmp/k64_*
 	@echo "cleaned"
@@ -75,4 +79,5 @@ help:
 	@echo "  make test-challenge     tactical puzzle tests"
 	@echo "  make test-tournament    self-play tournament"
 	@echo "  make test-sparring      sfida progressiva vs fruit (lento)"
+	@echo "  make test-feature-matrix  classifica le 8 combinazioni di feature eval"
 	@echo "  make clean              remove build artifacts"

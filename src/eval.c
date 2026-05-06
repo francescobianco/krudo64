@@ -84,16 +84,12 @@ static const int * const PST[6] = {
     PST_ROOK, PST_QUEEN,  PST_KING_MG
 };
 
-/* ── Mobility ─────────────────────────────────────────────────────────────── *
- * Conta i quadrati pseudo-legali raggiungibili da cavalli, alfieri, torri e  *
- * regine di *color*. Pedoni e re sono esclusi (contributo trascurabile o     *
- * già coperto dal PST del re).                                               *
- * Usa l'ATLAS esistente: nessuna nuova lookup table.                         */
-#define MOBILITY_WEIGHT 2   /* centipawn per mossa di vantaggio */
+/* ── Mobility ─────────────────────────────────────────────────────────────── */
+#define MOBILITY_WEIGHT 2
 
 static int mobility_count(const Board *b, int color)
 {
-    Bitboard free = ~b->occ[color];  /* quadrati non occupati da pezzi amici */
+    Bitboard free = ~b->occ[color];
     Bitboard occ  = b->all;
     int      n    = 0;
     Bitboard bb;
@@ -117,6 +113,38 @@ static int mobility_count(const Board *b, int color)
     return n;
 }
 
+/* ── Feature functions ────────────────────────────────────────────────────── */
+static int _zero      (const Board *b) { (void)b; return 0; }
+
+static int _mobility  (const Board *b) {
+    return MOBILITY_WEIGHT * (mobility_count(b, WHITE) - mobility_count(b, BLACK));
+}
+static int _pawn_struct(const Board *b) {
+    return PAWN_STRUCTURE[pawn_file_mask(b->pieces[WHITE][PAWN])]
+         - PAWN_STRUCTURE[pawn_file_mask(b->pieces[BLACK][PAWN])];
+}
+static int _clusters  (const Board *b) {
+    return eval_pawn_clusters(b->pieces[WHITE][PAWN], WHITE)
+         - eval_pawn_clusters(b->pieces[BLACK][PAWN], BLACK);
+}
+
+/* ── Feature pointers (swapped via eval_set_feature, no if in hot path) ───── */
+static int (*fp_mobility)   (const Board *) = _mobility;
+static int (*fp_pawn_struct)(const Board *) = _pawn_struct;
+static int (*fp_clusters)   (const Board *) = _clusters;
+
+void eval_set_feature(EvalFeature feat, int on)
+{
+    switch (feat) {
+        case EVAL_FEAT_MOBILITY:
+            fp_mobility    = on ? _mobility    : _zero; break;
+        case EVAL_FEAT_PAWN_STRUCT:
+            fp_pawn_struct = on ? _pawn_struct : _zero; break;
+        case EVAL_FEAT_CLUSTERS:
+            fp_clusters    = on ? _clusters    : _zero; break;
+    }
+}
+
 /* ── eval ─────────────────────────────────────────────────────────────────── */
 int eval(const Board *b)
 {
@@ -128,11 +156,7 @@ int eval(const Board *b)
             while (bb) {
                 int sq = LSB(bb);
                 POPLSB(bb);
-
                 score[color] += MATERIAL[pc];
-
-                /* PST index: for WHITE flip rank; for BLACK use sq directly  */
-                /* (sq ^ 56 maps a1→a8 perspective, matching the table above) */
                 int pst_idx = (color == WHITE)
                               ? (FILE(sq) + (7 - RANK(sq)) * 8)
                               : (sq ^ 56);
@@ -141,21 +165,9 @@ int eval(const Board *b)
         }
     }
 
-    /* Mobility: più mosse pseudo-legali = più libertà = vantaggio strutturale. *
-     * Penalizzare l'avversario con meno libertà di movimento vale MOBILITY_WEIGHT
-     * centipawn per ogni mossa di differenza.                                  */
-    int mob = MOBILITY_WEIGHT * (mobility_count(b, WHITE) - mobility_count(b, BLACK));
-
-    /* Struttura dei pedoni per colonna.
-     * pawn_file_mask() riduce la bitboard a 8 bit (colonna c'è / non c'è).
-     * PAWN_STRUCTURE[] assegna un punteggio tematico ai 256 pattern possibili
-     * premiando catene centrali e penalizzando pedoni isolati / isole multiple. */
-    int pawn_struct = PAWN_STRUCTURE[pawn_file_mask(b->pieces[WHITE][PAWN])]
-                    - PAWN_STRUCTURE[pawn_file_mask(b->pieces[BLACK][PAWN])];
-
-    int clusters = eval_pawn_clusters(b->pieces[WHITE][PAWN], WHITE)
-                 - eval_pawn_clusters(b->pieces[BLACK][PAWN], BLACK);
-
-    int s = (score[WHITE] - score[BLACK]) + mob + pawn_struct + clusters;
+    int s = (score[WHITE] - score[BLACK])
+          + fp_mobility(b)
+          + fp_pawn_struct(b)
+          + fp_clusters(b);
     return (b->side == WHITE) ? s : -s;
 }

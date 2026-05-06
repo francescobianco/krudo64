@@ -1,4 +1,5 @@
 #include "uci.h"
+#include "eval.h"
 #include "movegen.h"
 #include "search.h"
 #include <stdio.h>
@@ -92,12 +93,26 @@ void uci_loop(void)
         if (strcmp(line, "uci") == 0) {
             printf("id name krudo64\n");
             printf("id author Francesco Bianco\n");
+            printf("option name UseMobility type check default true\n");
+            printf("option name UsePawnStructure type check default true\n");
+            printf("option name UseClusters type check default true\n");
             printf("uciok\n");
             fflush(stdout);
 
         } else if (strcmp(line, "isready") == 0) {
             printf("readyok\n");
             fflush(stdout);
+
+        } else if (strncmp(line, "setoption", 9) == 0) {
+            const char *np = strstr(line, " name ");
+            const char *vp = strstr(line, " value ");
+            if (np && vp) {
+                np += 6;  vp += 7;
+                int on = (strncmp(vp, "true", 4) == 0) ? 1 : 0;
+                if      (strncmp(np, "UseMobility",     11) == 0) eval_set_feature(EVAL_FEAT_MOBILITY,    on);
+                else if (strncmp(np, "UsePawnStructure", 16) == 0) eval_set_feature(EVAL_FEAT_PAWN_STRUCT, on);
+                else if (strncmp(np, "UseClusters",     11) == 0) eval_set_feature(EVAL_FEAT_CLUSTERS,    on);
+            }
 
         } else if (strcmp(line, "ucinewgame") == 0) {
             board_init(&board);
