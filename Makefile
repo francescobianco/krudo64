@@ -7,7 +7,9 @@ OBJS    = $(patsubst src/%.c, out/%.o, $(SRCS))
 # All source files except main.c (for tests that supply their own main)
 LIB_SRCS = src/atlas.c src/board.c src/movegen.c src/eval.c src/search.c src/uci.c
 
-.PHONY: build run test test-unit test-functional test-integration test-challenge test-tournament clean help
+depth ?= 5
+
+.PHONY: build run perft test test-unit test-functional test-integration test-challenge test-tournament clean help
 
 build: $(TARGET)
 
@@ -22,6 +24,12 @@ out:
 
 run: build
 	@./$(TARGET)
+
+perft: out/perft_run
+	@./out/perft_run $(depth)
+
+out/perft_run: tests/functional/perft_run.c $(LIB_SRCS) | out
+	@$(CC) $(CFLAGS) -o $@ $^
 
 test: test-unit test-functional test-integration test-challenge
 
