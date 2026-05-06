@@ -22,9 +22,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from engine import play_game, find_exec, write_pgn  # noqa: E402
 
 # ── Configurazione ────────────────────────────────────────────────────────────
-KRUDO_DEPTH = 4   # profondità krudo (abbassata per velocità nel test)
-FRUIT_DEPTH = 3   # profondità fruit fissa
-PAIRS       = 2   # coppie di partite per combinazione (×2 = white+black)
+KRUDO_DEPTH  = 5            # profondità krudo fissa
+FRUIT_DEPTHS = range(1, 6)  # fruit d1..d5 — 1 coppia ciascuna = 10 partite/combo
 
 # Le 8 combinazioni: (label, mob, pawn_struct, clusters)
 COMBOS = [
@@ -58,32 +57,35 @@ def main() -> int:
         print("SKIP — fruit non trovato (sudo apt install fruit)")
         return 0
 
-    total_games = len(COMBOS) * PAIRS * 2
+    games_per_combo = len(FRUIT_DEPTHS) * 2
+    total_games     = len(COMBOS) * games_per_combo
     print(f"krudo64 : {krudo}  depth={KRUDO_DEPTH}")
-    print(f"fruit   : {fruit}  depth={FRUIT_DEPTH}")
-    print(f"partite : {PAIRS} paia × {len(COMBOS)} combo = {total_games} totali")
+    print(f"fruit   : {fruit}  depth d{FRUIT_DEPTHS.start}..d{FRUIT_DEPTHS.stop - 1}")
+    print(f"partite : {games_per_combo}/combo × {len(COMBOS)} combo = {total_games} totali"
+          f"  (max {games_per_combo * 2} pts/combo)")
     print()
 
     # Header tabella
     W = 10
-    print(f"  {'combo':^{W}}  M  S  C  |  W   D   L  | pts")
-    print("  " + "─" * (W + 30))
+    print(f"  {'combo':^{W}}  M  S  C  |  W   D   L  | pts/{games_per_combo * 2}")
+    print("  " + "─" * (W + 34))
 
     all_games = []
     results   = []
 
     for label, mob, struct, cluster in COMBOS:
         opts = combo_opts(mob, struct, cluster)
-        fl   = f"fruit(d{FRUIT_DEPTH})"
         kl   = f"krudo({label})"
         wins = draws = losses = 0
 
-        for pair in range(1, PAIRS + 1):
+        for fd in FRUIT_DEPTHS:
+            fl = f"fruit(d{fd})"
+
             # krudo = bianco
             r1, g1 = play_game(
                 krudo, KRUDO_DEPTH, kl,
-                fruit, FRUIT_DEPTH, fl,
-                f"{label}.{pair}w",
+                fruit, fd, fl,
+                f"{label}.d{fd}w",
                 white_opts=opts,
                 event="krudo64 feature-matrix",
             )
@@ -94,9 +96,9 @@ def main() -> int:
 
             # krudo = nero
             r2, g2 = play_game(
-                fruit, FRUIT_DEPTH, fl,
+                fruit, fd, fl,
                 krudo, KRUDO_DEPTH, kl,
-                f"{label}.{pair}b",
+                f"{label}.d{fd}b",
                 black_opts=opts,
                 event="krudo64 feature-matrix",
             )
@@ -114,7 +116,7 @@ def main() -> int:
         print(f"  {label:^{W}}  {ms}  {ss}  {cs}  | {wins:>2}  {draws:>2}  {losses:>2}  | {pts:>3}")
         sys.stdout.flush()
 
-    print("  " + "─" * (W + 30))
+    print("  " + "─" * (W + 34))
     print()
 
     # Classifica per punti (parità: più vittorie prima)
