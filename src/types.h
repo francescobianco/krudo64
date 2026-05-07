@@ -6,6 +6,12 @@
 typedef uint64_t Bitboard;
 typedef uint32_t Move;
 
+/* ── Piece list entry: (piece_type << 6) | square (fits in 9 bits) ────────── */
+typedef uint16_t PLEntry;
+#define PL_MK(pc, sq)  ((PLEntry)(((pc) << 6) | (sq)))
+#define PL_SQ(e)       ((int)((e) & 63))
+#define PL_PC(e)       ((int)((e) >> 6))
+
 /* ── Colors ───────────────────────────────────────────────────────────────── */
 #define WHITE 0
 #define BLACK 1

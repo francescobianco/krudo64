@@ -18,6 +18,35 @@ static const char PIECE_CHARS[2][6] = {
 static const int ROOK_FROM[2][2] = { { H1, A1 }, { H8, A8 } };
 static const int ROOK_TO[2][2]   = { { F1, D1 }, { F8, D8 } };
 
+/* Offset from the EP landing square to the captured pawn's square. */
+static const int EP_CAPT[2] = {-8, +8};  /* WHITE: to-8, BLACK: to+8 */
+
+/* ── Piece list helpers ───────────────────────────────────────────────────── */
+static int pl_find(const Board *b, int c, int sq)
+{
+    for (int i = 0; i < b->pl_n[c]; i++)
+        if (PL_SQ(b->pl[c][i]) == sq) return i;
+    return -1;
+}
+
+static void pl_rem(Board *b, int c, int idx)
+{
+    b->pl[c][idx] = b->pl[c][--b->pl_n[c]];
+}
+
+static void rebuild_pl(Board *b)
+{
+    b->pl_n[0] = b->pl_n[1] = 0;
+    for (int c = 0; c < 2; c++)
+        for (int pc = 0; pc < 6; pc++) {
+            Bitboard bb = b->pieces[c][pc];
+            while (bb) {
+                int sq = LSB(bb); POPLSB(bb);
+                b->pl[c][b->pl_n[c]++] = PL_MK(pc, sq);
+            }
+        }
+}
+
 /* ── board_init ───────────────────────────────────────────────────────────── */
 void board_init(Board *b)
 {
@@ -106,6 +135,7 @@ void board_from_fen(Board *b, const char *fen)
         b->occ[BLACK] |= b->pieces[BLACK][pc];
     }
     b->all = b->occ[WHITE] | b->occ[BLACK];
+    rebuild_pl(b);
 }
 
 /* ── board_to_fen ─────────────────────────────────────────────────────────── */
@@ -275,6 +305,23 @@ void board_make(Board *b, Move m, Undo *u)
     if (us == BLACK)
         b->fullmove++;
 
+    /* ── Update piece list (incremental) ─────────────────────────────────── */
+    {
+        int pi = pl_find(b, us, from);
+        b->pl[us][pi] = PL_MK((promo != NONE) ? promo : pc, to);
+
+        if (cap != NONE) {
+            int csq = MV_IS_EP(m) ? to + EP_CAPT[us] : to;
+            pl_rem(b, them, pl_find(b, them, csq));
+        }
+
+        if (MV_IS_CASTLE(m)) {
+            int ks = (to > from) ? 0 : 1;
+            int ri = pl_find(b, us, ROOK_FROM[us][ks]);
+            b->pl[us][ri] = PL_MK(ROOK, ROOK_TO[us][ks]);
+        }
+    }
+
     /* ── Flip side ────────────────────────────────────────────────────────── */
     b->side ^= 1;
 }
@@ -332,6 +379,23 @@ void board_undo(Board *b, Move m, const Undo *u)
     b->ep       = u->ep;
     b->castle   = u->castle;
     b->halfmove = u->halfmove;
+
+    /* ── Update piece list (incremental undo) ─────────────────────────────── */
+    {
+        int pi = pl_find(b, us, to);
+        b->pl[us][pi] = PL_MK(pc, from);   /* pc is original piece pre-promo */
+
+        if (cap != NONE) {
+            int csq = MV_IS_EP(m) ? to + EP_CAPT[us] : to;
+            b->pl[them][b->pl_n[them]++] = PL_MK(cap, csq);
+        }
+
+        if (MV_IS_CASTLE(m)) {
+            int ks = (to > from) ? 0 : 1;
+            int ri = pl_find(b, us, ROOK_TO[us][ks]);
+            b->pl[us][ri] = PL_MK(ROOK, ROOK_FROM[us][ks]);
+        }
+    }
 }
 
 /* ── board_print ──────────────────────────────────────────────────────────── */

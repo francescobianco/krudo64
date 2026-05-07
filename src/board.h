@@ -4,9 +4,14 @@
 
 /* ── Board state ──────────────────────────────────────────────────────────── */
 typedef struct {
-    Bitboard pieces[2][6]; /* [color][piece]              */
-    Bitboard occ[2];       /* [color] all pieces of color */
-    Bitboard all;          /* all pieces                  */
+    Bitboard pieces[2][6]; /* [color][piece]                                  */
+    Bitboard occ[2];       /* [color] all pieces of color                     */
+    Bitboard all;          /* all pieces                                      */
+    /* Piece list: pl[color][0..pl_n[color]-1] = PL_MK(piece, sq).           *
+     * Per-color ordering lets movegen iterate our pieces without checking    *
+     * color per entry — the list index IS the color filter.                  */
+    PLEntry  pl[2][16];
+    int      pl_n[2];
     int      side;         /* side to move                */
     int      ep;           /* en-passant target sq        */
     int      castle;       /* castling rights bitmask     */
